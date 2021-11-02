@@ -155,10 +155,6 @@ process_atac_bam <- function(bam){
 fls <- list.files("aligned_data/", pattern = "chr22.bam$",
                        full.names = TRUE)
 
-bam_list <- BamFileList(fls, yieldSize = 10000, asMates = FALSE)
-
-process_atac_bam(bam_list[[3]])
-
 lapply(bam_list, process_atac_bam)
 ```
 
