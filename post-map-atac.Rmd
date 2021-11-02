@@ -159,10 +159,10 @@ bam_list <- list.files("aligned_data/", pattern = "chr22.bam$",
 lapply(bam_list, process_atac_bam)
 ```
 
-Call peaks for each sample using macs2
+Call peaks for each sample using macs2. This function requires you to have macs2 installed and in your PATH. 
 ```{r}
 
-atac_bed <- "aligned_data/test.bed"
+atac_bed <- "aligned_data/test.bed.gz"
 
 call_macs_peaks <- function(atac_bed){
     
@@ -179,13 +179,14 @@ call_macs_peaks <- function(atac_bed){
 
 # List the atac bed files
 atac_bed_list <- list.files("aligned_data/",
-                            pattern = ".bed$", full.names = TRUE)
+                            pattern = ".bed.gz$", full.names = TRUE)
 
 # Run the peak calling function for all of the bed files
-
-
+lapply(atac_bed_list, call_macs_peaks)
 
 ```
+
+
 
 
 
