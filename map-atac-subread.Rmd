@@ -1,0 +1,60 @@
+---
+title: "Untitled"
+author: "Sam Buckberry"
+date: "02/11/2021"
+output: html_document
+---
+
+```{r}
+
+Write a function to align all samples. Here the inputs are the `.fastq.gz` files, and the output is a `.bam` file. 
+```{r}
+# function to align all samples
+
+r1_list <- list.files("fastq/", pattern = "_R1.fastq.gz",
+                      full.names = TRUE)
+
+r2_list <- list.files("fastq/", pattern = "_R2.fastq.gz",
+                      full.names = TRUE)
+
+bam_list <- basename(r1_list) %>%
+    str_replace("_R1.fastq.gz", ".bam")
+
+dir.create("aligned_data")
+bam_list <- str_c("aligned_data/", bam_list)
+
+fq_df <- data.frame(r1 = r1_list, r2 = r2_list, bam = bam_list)
+
+# Double check all files exist
+all(file.exists(c(r1_list, r2_list)))
+```
+
+Build the Rsubread alignment index
+```{r, cache=TRUE}
+buildindex(basename="reference/GRCh38_chr22",
+           reference="reference/Homo_sapiens.GRCh38.dna.chromosome.22.fa.gz")
+```
+
+
+```{r}
+# Function to align reads for each sample
+align_list <- function(x, threads=1){
+    
+    align(index="reference/GRCh38_chr22",
+          type = "dna",
+          unique = TRUE,
+          sortReadsByCoordinates = TRUE,
+          minFragLength = 25,
+          maxFragLength = 2000,
+          readfile1= fq_df$r1[x],
+          readfile2 = fq_df$r2[x],
+          output_file = fq_df$bam[x],
+          nthreads = threads)
+    
+}
+
+# Apply function to list of samples
+align_dat <- lapply(1:nrow(fq_df), align_list, threads=2)
+```
+
+
