@@ -95,7 +95,6 @@ Make Tn5 insertion-centered bed files for peak calling, and bigwig files for bro
 
 process_atac_bam <- function(bam){
     
-    # Get single reads loaded for offsetting to get tn5 insertion site
     message(Sys.time())
     
     # Read the BAM file in 10,000 read chunks to preserve memory
@@ -115,10 +114,8 @@ process_atac_bam <- function(bam){
         resize(width = 50, fix = "start")
     
     shift_gr <- c(pos, neg)
-    rm(pos, neg, bam_gr); gc()
     strand(shift_gr) <- "+"
     
-    # Calculate Tn insertion coverage
     message("Calculating coverage")
     cov <- coverage(shift_gr)
     
@@ -142,17 +139,21 @@ process_atac_bam <- function(bam){
     dat$strand <- "+"
     
     out_bed <- str_replace(string = bam, pattern = ".bam",
-                           replacement = "_atac.bed")
+                           replacement = "_atac.bed.gz")
     
     message(str_c("Writing ", out_bed))
-    write.table(x = dat, file = out_bed, quote = FALSE, sep = "\t",
+    gz1 <- gzfile(out_bed, "w")
+    
+    write.table(x = dat, file = gz1, quote = FALSE, sep = "\t",
                         row.names = FALSE, col.names = FALSE)
-
+    
+    close(gz1)
+    
     message(str_c("Completed ", Sys.time()))
         
 }
 
-fls <- list.files("aligned_data/", pattern = "chr22.bam$",
+bam_list <- list.files("aligned_data/", pattern = "chr22.bam$",
                        full.names = TRUE)
 
 lapply(bam_list, process_atac_bam)
