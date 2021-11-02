@@ -5,7 +5,13 @@ date: "02/11/2021"
 output: html_document
 ---
 
+Load libraries
 ```{r}
+library(magrittr)
+library(stringr)
+library(Rsubread)
+```
+
 
 Write a function to align all samples. Here the inputs are the `.fastq.gz` files, and the output is a `.bam` file. 
 ```{r}

@@ -11,7 +11,7 @@ library(magrittr)
 library(Rfastp)
 library(DT)
 library(ggplot2)
-library(cowplot)
+#library(cowplot)
 ```
 
 ### FASTQ quality control and filtering
@@ -57,7 +57,7 @@ multi_fastp <- function(x){
                             adapterTrimming = TRUE,
                             cutLowQualTail = TRUE,
                             cutLowQualFront = TRUE,
-                            thread = 1)
+                            thread = 2)
     return(fastp_json_report)
 }
 
