@@ -90,23 +90,22 @@ Process all alignments with the bash script
 ```
 
 
-Make Tn5 insertion-centered bed files for peak calling
+Make Tn5 insertion-centered bed files for peak calling, and bigwig files for browser and plotting. 
 ```{r}
-
-# Make Tn5 insertions bigwig ----------------------------------------------
-
-bam <- "aligned_data/1001-Effector_CD4pos_T-S_chr22_dedup.bam"
 
 process_atac_bam <- function(bam){
     
     # Get single reads loaded for offsetting to get tn5 insertion site
     message(Sys.time())
+    
+    # Read the BAM file in 10,000 read chunks to preserve memory
     message(str_c("Reading ", bam))
+    bam_file <- BamFile(bam, yieldSize = 10000)
+    open(bam_file)
     bam_gr <- readGAlignments(file = bam) %>% GRanges()
-    
-    # Offset alignments to Tn5 insertion sites
-    message("Offset alignments")
-    
+    close(bam_file)
+
+    message("Offset alignments to Tn5 insertion sites")
     pos <- bam_gr[strand(bam_gr) == "+"] %>% 
         GenomicRanges::shift(shift=4) %>%
         resize(width = 50, fix = "start")
@@ -117,7 +116,7 @@ process_atac_bam <- function(bam){
     
     shift_gr <- c(pos, neg)
     rm(pos, neg, bam_gr); gc()
-    strand(shift_gr) <- "*"
+    strand(shift_gr) <- "+"
     
     # Calculate Tn insertion coverage
     message("Calculating coverage")
@@ -137,33 +136,30 @@ process_atac_bam <- function(bam){
     export.bw(object = cov_cpm, con = out_bw)
     
     # write the tn5 centered bed file for peak calling
-    gr_to_bed <- function(gr, out_path){
-            dat <- as.data.frame(gr)[ ,1:3]
-            dat$name <- "."
-            dat$score <- "."
-            dat$strand <- "+"
-            write.table(x = dat, file = out_path, quote = FALSE, sep = "\t",
-                        row.names = FALSE, col.names = FALSE)
-    }
+    dat <- as.data.frame(shift_gr)[ ,1:3]
+    dat$name <- "."
+    dat$score <- "."
+    dat$strand <- "+"
     
     out_bed <- str_replace(string = bam, pattern = ".bam",
                            replacement = "_atac.bed")
     
     message(str_c("Writing ", out_bed))
-    
-    gr_to_bed(gr = shift_gr, out_path = out_bed)
-    
+    write.table(x = dat, file = out_bed, quote = FALSE, sep = "\t",
+                        row.names = FALSE, col.names = FALSE)
+
     message(str_c("Completed ", Sys.time()))
         
 }
 
-bam_list <- list.files("aligned_data/", pattern = "chr22.bam$",
+fls <- list.files("aligned_data/", pattern = "chr22.bam$",
                        full.names = TRUE)
 
-process_atac_bam(bam_list[1])
+bam_list <- BamFileList(fls, yieldSize = 10000, asMates = FALSE)
+
+process_atac_bam(bam_list[[3]])
 
 lapply(bam_list, process_atac_bam)
-
 ```
 
 Call peaks for each sample using macs2
