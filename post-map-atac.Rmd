@@ -315,6 +315,15 @@ head(peak_counts)
 ```
 
 
+Save the peak counts table
+```{r}
+dir.create("processed_data")
+write.table(x = peak_counts, "processed_data/atac_peak_counts.tsv",
+            quote = FALSE, row.names = TRUE, col.names = TRUE, sep = "\t")
+```
+
+
+
 Calculate reads in peaks and plot
 ```{r}
 peak_count_sums <- colSums(peak_counts)
@@ -418,4 +427,9 @@ plot_pca(peak_filt_rpkm_norm)
 ```
 
 And now, PC1 seperates the treatment and control groups. 
+
+
+```{r}
+sessionInfo()
+```
 

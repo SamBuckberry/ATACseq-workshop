@@ -1,0 +1,134 @@
+---
+title: 'ATAC-seq: differential accessability analysis'
+author: "Sam Buckberry"
+output: html_document
+---
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+library(GenomicRanges)
+library(GenomicAlignments)
+library(edgeR)
+
+library(stringr)
+library(magrittr)
+library(ggplot2)
+library(ggrepel)
+```
+
+Read the peak counts
+```{r}
+peak_counts <- read.table("processed_data/atac_peak_counts.tsv")
+```
+
+Set the treatment and control groups
+```{r}
+groups <- ifelse(test = grepl(pattern = "_T.U", x = colnames(peak_counts)),
+                 yes = "Unstimulated", no = "Stimulated")
+samples <- str_sub(string = colnames(peak_counts), start = 2, end = 5)
+samples <- str_c(samples, groups, sep = "_")
+
+```
+
+Load counts into a DGEList
+```{r}
+y <- DGEList(counts = peak_counts, group = groups, samples = samples)
+```
+
+Design matrix for differential testing
+```{r}
+design <- model.matrix(~ 0 + groups)
+design
+
+# Clean up the column names (will make things easier later)
+colnames(design) <- c("Stimulated", "Unstimulated")
+design
+```
+
+
+Filter to remove peaks with low counts that would not be useful in statistical testing
+```{r}
+keep <- filterByExpr(y)
+table(keep)
+
+y <- y[keep, , keep.lib.sizes=FALSE]
+```
+
+Calculate normalisation factors
+```{r}
+y <- calcNormFactors(y)
+y$samples
+```
+
+
+Differential testing using Limma-Voom
+```{r}
+v <- voom(counts = y, design = design, plot = TRUE)
+```
+
+What is voom doing?
+
+Counts are transformed to log2 counts per million reads (CPM), where “per million reads” is defined based on the normalization factors we calculated earlier.
+A linear model is fitted to the log2 CPM for each peak, and the residuals are calculated.
+A smoothed curve is fitted to the sqrt(residual standard deviation) by average peak counts (see red line in plot above)
+The smoothed curve is used to obtain weights for each peak and sample that are passed into limma along with the log2 CPMs.
+More details for the application of this method to RNA-seq data can be found here.  https://genomebiology.biomedcentral.com/articles/10.1186/gb-2014-15-2-r29
+
+
+```{r, fig.height=5}
+boxplot(v$E, names=v$targets$samples)
+```
+If the boxplots look markedly different between samples (the above look ok), a quantile normalisation might be beneficial.
+```{r}
+vq <- voom(counts = y, design = design, plot = TRUE,
+           normalize.method = "quantile")
+```
+
+
+
+```{r, fig.height=5}
+boxplot(vq$E, names=v$targets$samples)
+```
+
+
+### Differential expression testing
+
+Fitting linear models in Limma
+```{r}
+fit <- lmFit(object = v, design = design)
+```
+
+Make the contrasts matrix
+```{r}
+contr <- makeContrasts(Stimulated - Unstimulated, levels = colnames(coef(fit)))
+contr
+```
+
+Estimate contrasts for each gene
+```{r}
+fit2 <- contrasts.fit(fit, contr)
+```
+
+Empirical Bayes smoothing of standard errors (shrinks standard errors that are much larger or smaller than those from other peaks towards the average standard error) (see https://www.degruyter.com/doi/10.2202/1544-6115.1027)
+```{r}
+eb <- eBayes(fit2)
+```
+
+Check out the top differential expressed genes
+```{r}
+topTable(eb)
+```
+
+Put all DE testing results into an object for plotting and saving
+```{r}
+tt2 <- topTable(eb, number = nrow(v))
+tt2$Significant <- ((abs(tt2$logFC) > 1) & (tt2$adj.P.Val < 0.05))
+```
+
+How many DE peaks are there?
+```{r}
+table(tt2$Significant)
+```
