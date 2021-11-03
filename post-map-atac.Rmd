@@ -12,8 +12,14 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(GenomicRanges)
 library(GenomicAlignments)
-```
+library(edgeR)
 
+library(UpSetR)
+library(stringr)
+library(magrittr)
+library(ggplot2)
+library(ggrepel)
+```
 
 ### Post-alignment processing
 Much of the post-alignment processing is done with `samtools` outside of R. While some of this is possible with the `Rsamtools` package, it is much more efficient to write a short shell script with the following steps. 
@@ -159,16 +165,19 @@ bam_list <- list.files("aligned_data/", pattern = "chr22.bam$",
 lapply(bam_list, process_atac_bam)
 ```
 
+
 Call peaks for each sample using macs2. This function requires you to have macs2 installed and in your PATH. 
 ```{r}
 
 atac_bed <- "aligned_data/test.bed.gz"
 
+dir.create("peaks")
+
 call_macs_peaks <- function(atac_bed){
     
     macs_name <- basename(atac_bed) %>% 
         str_remove(pattern = ".bed") %>%
-        str_c("peaks", .)
+        str_c("peaks/", .)
     
     cmd <- str_c("macs2 callpeak --gsize hs --nomodel --keep-dup all --name ",
                  macs_name, " -t ", atac_bed)
@@ -187,11 +196,226 @@ lapply(atac_bed_list, call_macs_peaks)
 ```
 
 
+Plot peak overlaps
+```{r}
+peak_fls <- list.files("peaks/", pattern = ".narrowPeak", full.names = TRUE)
+
+# Function to read peak files
+peak_to_gr <- function(peak_file){
+    
+    dat <- read.table(peak_file)
+    
+    gr <- GRanges(seqnames = dat$V1,
+                  ranges = IRanges(start = dat$V2, end = dat$V3))
+    
+    gr$sample <- basename(peak_file) %>% str_remove("_peaks_narrowPeak")
+    
+    return(gr)
+}
+```
 
 
+```{r}
+# Make GRangesList of peaks for all samples
+peak_grl <- lapply(peak_fls, peak_to_gr) %>% GRangesList()
+names(peak_grl) <- basename(peak_fls)
+
+```
 
 
+How many peaks detected for each sample?
+```{r}
+lengths(peak_grl)
+```
+
+How wide are the peaks?
+```{r}
+get_peak_widths <- function(x){
+    
+    peak_widths <- width(peak_grl[[x]]) %>% as.numeric()
+    peak_widths <- data.frame(width = peak_widths, id = names(peak_grl[x]))
+    return(peak_widths)
+}
+
+peak_widths <- lapply(1:length(peak_grl), get_peak_widths) %>%
+    do.call(rbind, .)
+
+gg_width_hist <- ggplot(data = peak_widths, aes(x = width)) +
+    geom_histogram() + 
+    facet_wrap(.~id) + 
+    xlab("Peak width") +
+    theme_bw()
+
+gg_width_hist
+```
+
+How many peaks overlap between samples?
+```{r}
+# Make a union peak set for comparing overlaps
+union_peak_gr <- unlist(peak_grl) %>% GenomicRanges::reduce()
+
+# Count peak overlaps with union peak set
+peak_hits <- lapply(peak_grl, function(x){overlapsAny(union_peak_gr, x)})
+
+# Create a matrix of TRUE/FALSE for peak overlaps
+peak_hits <- do.call(cbind, peak_hits)
+colnames(peak_hits) <- names(peak_grl) %>%
+    str_remove("_chr22_atac.gz_peaks.narrowPeak")
+rownames(peak_hits) <- as.character(union_peak_gr) 
+
+# Convert the TRUE/FALSE values into 1/0 
+peak_hits <- peak_hits + 0
+
+# Convert to data.frame for plotting
+peak_hits <- as.data.frame(peak_hits)
+
+# Make un upset plot to visualise peak overlaps between samples
+upset(data = peak_hits, ncol(peak_hits), nintersects = 16)
+
+```
 
 
+This presence/absence calling of peaks does not give us a lot of information, as some samples may have less noise, and more power for detecting peaks. For this reason, it is a good idea to get a normalised measure of reads in peaks, and then compare samples. 
 
+Calculate number of reads (Tn5 insertions) in peaks for each sample using`.bed` fileswe used for the peak calling
+```{r}
+
+# Function to calculate read overlaps. Returns a matrix of counts
+calc_read_peak_olaps <- function(bed_file_list, peak_set){
+    
+    
+    get_olaps <- function(bed_file){
+        
+        read_gr <- bed_to_gr(bed_file)
+        olaps <- countOverlaps(query = peak_set, subject = read_gr)
+        stopifnot(length(olaps) == length(peak_set))
+    
+        return(olaps)
+    }
+    
+    peak_olaps <- lapply(X = bed_file_list, FUN = get_olaps)
+
+    peak_olaps <- do.call(cbind, peak_olaps)
+    
+    colnames(peak_olaps) <- basename(bed_file_list)
+    
+    rownames(peak_olaps) <- as.character(peak_set)
+    
+    return(peak_olaps)
+
+}
+
+peak_counts <- calc_read_peak_olaps(bed_file_list = atac_bed_list,
+                                    peak_set = union_peak_gr)
+
+# Trim down the column names
+colnames(peak_counts) <- colnames(peak_counts) %>% str_remove("_chr22_atac.bed.gz")
+
+head(peak_counts)
+```
+
+
+Calculate reads in peaks and plot
+```{r}
+peak_count_sums <- colSums(peak_counts)
+
+qplot(y=peak_count_sums, x=names(peak_count_sums), geom="col") +
+    coord_flip() + theme_bw()
+```
+
+Calculate Fraction of reads in peaks (FRiP) and plot 
+```{r}
+
+get_read_counts <- function(x){
+    dat <- read.table(atac_bed_list[x])
+    return(nrow(dat))
+}
+
+lib_sizes <- lapply(1:length(atac_bed_list), get_read_counts) 
+lib_sizes <- unlist(lib_sizes)
+
+FRiP <- peak_count_sums / lib_sizes
+
+qplot(y=FRiP, x=names(FRiP), geom="col") +
+    coord_flip() + theme_bw()
+```
+
+Calculate length-normalised, and library size normalised peak counts for plotting
+```{r}
+peak_rpkm <- rpkm(peak_counts, gene.length = width(union_peak_gr),
+                  log = TRUE, prior.count = 1)
+
+```
+
+Boxplot peak rpkm
+```{r}
+boxplot(peak_rpkm)
+```
+
+Let's check how the samples look in a PCA
+```{r}
+plot_pca <- function(mat, dim1=1, dim2=2, scale=TRUE){
+        
+        # Remove incomplete cases
+        mat <- mat[complete.cases(mat), ]
+        
+        # Transpose
+        mat <- t(mat)
+        
+        # Remove low variance features
+        #lowVar <- nearZeroVar(mat, saveMetrics = TRUE)
+        #message(str_c("Low variance features removed = ", sum(lowVar$nzv)))
+        #mat <- mat[ ,!lowVar$nzv]
+        
+        # Calculate PC's
+        pr <- prcomp(x = mat, scale.=scale)
+        pc1 <- (summary(pr)$importance[2, dim1] * 100) %>% round(digits = 1)
+        pc2 <- (summary(pr)$importance[2, dim2] * 100) %>% round(digits = 1)
+
+        pc1_dat <- pr$x[ ,dim1]
+        pc2_dat <- pr$x[ ,dim2]
+        samples <- rownames(pr$x)
+        
+        pca_df <- data.frame(Sample=samples, PC1=pc1_dat, PC2=pc2_dat)
+        
+        gg_pca <-  ggplot(data = pca_df,
+                          mapping = aes(x = PC2, y = PC1, label=Sample)) +
+                geom_point(alpha=0.8, size=4) +
+                theme_linedraw() +
+                theme(panel.grid = element_line(colour = 'grey')) +
+                geom_text_repel(data = subset(pca_df, samples %in% samples),
+                                point.padding = unit(1, "lines"), size=3) +
+                xlab(str_c("PC", dim2, " (", pc2, "%)")) +
+                ylab(str_c("PC", dim1, " (", pc1, "%)"))
+        gg_pca
+}
+
+
+atac_pca <- plot_pca(peak_rpkm)
+atac_pca
+```
+
+
+Here we see some variance in the read count distributions between libraries, and not real clear seperation of treatment groups. 
+In these cases, removing peaks with low counts and between-sample normalisaion often helps. 
+
+Filter low-count peaks and plot PCA
+```{r}
+keep <- filterByExpr(peak_counts)
+
+peak_filt_rpkm <- rpkm(peak_counts[keep, ], gene.length = width(union_peak_gr[keep]),
+                  log = TRUE, prior.count = 1)
+
+plot_pca(peak_filt_rpkm)
+```
+
+Here we see that PC2 seperates the treatment and control groups. 
+
+And now with quantile normalisation
+```{r}
+peak_filt_rpkm_norm <- normalizeBetweenArrays(peak_filt_rpkm, method = "quantile")
+plot_pca(peak_filt_rpkm_norm)
+```
+
+And now, PC1 seperates the treatment and control groups. 
 
