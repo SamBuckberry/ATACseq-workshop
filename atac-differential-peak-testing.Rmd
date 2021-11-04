@@ -9,15 +9,25 @@ output: html_document
 ---
 
 ```{r}
+# BioC packages
 library(GenomicRanges)
 library(GenomicAlignments)
 library(edgeR)
+library(ggbio)
 
+# CRAN packages
 library(stringr)
 library(magrittr)
 library(ggplot2)
 library(ggrepel)
+library(pheatmap)
+library(tidyr)
 ```
+
+https://asia.ensembl.org/info/genome/funcgen/regulatory_build.html
+
+http://ftp.ensembl.org/pub/current_regulation/homo_sapiens/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20210107.gff.gz
+
 
 Read the peak counts
 ```{r}
@@ -132,3 +142,80 @@ How many DE peaks are there?
 ```{r}
 table(tt2$Significant)
 ```
+
+
+
+### Differential testing summary plots
+
+Volcano plot
+```{r}
+gg_volcano <- ggplot(tt2, aes(x = logFC, y = -log10(P.Value),
+                             fill=Significant, colour=Significant)) +
+    geom_point(alpha=0.5) +
+    geom_vline(xintercept = c(-1, 1), linetype="dashed")
+gg_volcano
+```
+
+MA plot
+```{r}
+gg_ma <- ggplot(tt2, aes(x = AveExpr, y = logFC, colour=Significant)) +
+    geom_point(alpha=0.5) +
+    geom_vline(xintercept = c(1), linetype="dashed") +
+    geom_hline(yintercept = c(-1, 1), linetype="dashed")
+gg_ma
+```
+
+### Significant peak plots
+
+DE gene heatmap of DE genes
+```{r}
+top_de_cpm <- v$E[rownames(v$E) %in% rownames(tt2)[tt2$Significant == TRUE], ]
+colnames(top_de_cpm) <- v$targets$samples
+
+pheatmap(top_de_cpm, scale = "row", show_rownames = FALSE)
+```
+
+Plot normalised gene expression for top genes
+```{r}
+plot_gene <- function(gene_ids){
+    
+    # Get the normalised expression data for the selected genes
+    dat <- v$E[rownames(v$E) %in% gene_ids, ] %>% 
+        data.frame()
+    colnames(dat) <- v$targets$samples
+    
+    # Re-shape the data into the ggplot preffered long format
+    dat <- tibble::rownames_to_column(dat, var = "gene_id") %>%
+        tidyr::gather(sample, value, -gene_id)
+    
+    # Add the group data
+    dat$group <- v$targets$group[match(dat$sample, v$targets$samples)]
+    
+    # plot the gene expression vaues
+    ggplot(data = dat, aes(x = group, y = value)) + 
+        geom_point(size=3, alpha=0.5) +
+        facet_wrap(~gene_id, scales = "free_y") +
+        ylab("Normalised gene expression") +
+        theme_bw()
+        
+}
+
+my_top_genes <- rownames(tt2)[tt2$Significant == TRUE][1:6]
+
+plot_gene(gene_ids = my_top_genes)
+
+```
+
+
+
+
+```{r}
+reg_gr <- rtracklayer::import("reference/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20210107.gff.gz", format = "gff")
+
+table(reg_gr$feature_type)
+table(reg_gr$description)
+head(reg_gr$ID)
+```
+
+
+
