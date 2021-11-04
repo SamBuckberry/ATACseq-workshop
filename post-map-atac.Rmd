@@ -92,19 +92,21 @@ rm "$prefix"_filtered.bam "$prefix"_sorted.bam "$prefix"_sorted.bam.bai "$prefix
 
 ```
 
-Process all alignments with the bash script
-```{bash}
 
+We can then run that script in parallel to process all the BAM files
+```{bash}
+cd aligned data
+
+parallel sh ../process-atac-bam.sh {} ../reference/hg38.blacklist.bed ::: *_filt_fastp.bam
 
 ```
 
-
 List the BAM files
 ```{r}
-bam_list <- list.files("aligned_data/", pattern = "filt_fastp.bam$",
+bam_list <- list.files("aligned_data/", pattern = "_dedup.bam$",
                        full.names = TRUE)
 
-ids <- basename(bam_list) %>% str_remove_all("_filt_fastp.bam") %>%
+ids <- basename(bam_list) %>% str_remove_all("_filt_fastp_dedup.bam") %>%
     str_remove_all("Effector_")
 ```
 
