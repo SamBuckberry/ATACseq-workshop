@@ -208,14 +208,76 @@ plot_gene(gene_ids = my_top_genes)
 
 
 
+### Annotate differential peaks
 
+Get the significant peaks up- and down-regulated into GRanges objects
 ```{r}
-reg_gr <- rtracklayer::import("reference/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20210107.gff.gz", format = "gff")
+sig_peaks_up <- rownames(tt2)[tt2$Significant == TRUE & tt2$logFC > 0] %>%
+    GRanges()
 
-table(reg_gr$feature_type)
-table(reg_gr$description)
-head(reg_gr$ID)
+sig_peaks_down <- rownames(tt2)[tt2$Significant == TRUE & tt2$logFC < 0] %>%
+    GRanges()
 ```
 
+Import ENCODE regulatory elements data
+```{r}
+reg_gr <- rtracklayer::import("reference/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20210107.gff.gz", format = "gff")
+```
 
+Get the overlapping regulatory elements for the peaks
+```{r}
+
+annotate_peaks <- function(query_gr, subject_gr, subject_annotate_col="feature_type"){
+    
+    # Get overlapping ranges
+    olaps <- findOverlaps(query = query_gr, subject = subject_gr)
+
+    # Get query ranges with no hits
+    gr_no_hit <- query_gr[!overlapsAny(query_gr, subject_gr)]    
+    gr_no_hit$feature <- "No feature"
+    
+    # Get query ranges with hits.
+    # Note that this permits query ranges that overlap more than one subject range
+    
+    gr_hit <- query_gr[olaps@from]
+    gr_hit$feature <- mcols(subject_gr)[olaps@to, subject_annotate_col]
+    
+    gr <- c(gr_no_hit, gr_hit)
+    
+    return(gr)
+}
+
+peaks_up_annot <- annotate_peaks(query_gr = sig_peaks_up, subject_gr = reg_gr)
+peaks_up_annot$direction <- "Up"
+
+peaks_down_annot <- annotate_peaks(query_gr = sig_peaks_down, subject_gr = reg_gr)
+peaks_down_annot$direction <- "Down"
+
+all_peaks_annot <- c(peaks_up_annot, peaks_down_annot) %>% as.data.frame()
+head(all_peaks_annot)
+```
+
+Plot the peak annotations
+```{r}
+
+gg_annot <- ggplot(all_peaks_annot, aes(x = direction, fill=feature)) +
+    geom_bar() + theme_bw()
+
+gg_annot
+```
+
+...or plot proportionally
+```{r}
+gg_annot_prop <- ggplot(all_peaks_annot, aes(x = direction, fill=feature)) +
+    geom_bar(position = "fill") + 
+    geom_text(
+    aes(label=signif(..count.. / tapply(..count.., ..x.., sum)[as.character(..x..)], digits=2)),
+    stat="count",
+    position=position_fill(vjust=0.5)) +
+    labs(y="Proportion") +
+    theme_bw()
+
+gg_annot_prop
+
+```
 
