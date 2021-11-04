@@ -12,7 +12,10 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(GenomicRanges)
 library(GenomicAlignments)
+library(GenomicFeatures)
 library(edgeR)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+
 
 library(UpSetR)
 library(stringr)
@@ -96,26 +99,184 @@ Process all alignments with the bash script
 ```
 
 
-Make Tn5 insertion-centered bed files for peak calling, and bigwig files for browser and plotting. 
+List the BAM files
+```{r}
+bam_list <- list.files("aligned_data/", pattern = "filt_fastp.bam$",
+                       full.names = TRUE)
+
+ids <- basename(bam_list) %>% str_remove_all("_filt_fastp.bam") %>%
+    str_remove_all("Effector_")
+```
+
+Plot insert sizes for each library
 ```{r}
 
-process_atac_bam <- function(bam){
+plot_insert_sizes <- function(bam_file, title="") {
+    
+    # Check if BAM file is paired end
+    stopifnot(testPairedEndBam(file = bam_file))
+    
+    # Setup the filtering parameters for the BAM file
+    param <- ScanBamParam(what=c('isize'),
+                          flag = scanBamFlag(isSecondaryAlignment = FALSE,
+                                             isUnmappedQuery=FALSE,
+                                             isNotPassingQualityControls = FALSE))
+    
+    # Get the insert sizes from the bam file and tabulate
+    isize <- scanBam(bam_file, param=param) %>%
+        unlist(use.names = FALSE) %>% abs() %>% table()
+    
+    df <- data.frame(x = as.numeric(names(isize)), y = as.numeric(isize))
+    
+    # Limit width to 1000 bases for plotting
+    df <- df[df$x < 1000, ]
+    
+    gg_insert <- ggplot(df, aes(x = x, y = y)) + 
+        geom_line() + 
+        xlab("Fragment length (bp)") +
+        ylab("Fragment counts") +
+        ggtitle(title) +
+        theme_bw()
+    
+    return(gg_insert)
+}
+
+
+# Plot insert sizes for first BAM file
+plot_insert_sizes(bam_list[1])
+
+
+# Plot all BAMs together
+gg_insert_plots <- lapply(1:length(bam_list),
+                          function(x){plot_insert_sizes(bam_list[x], ids[x])})
+
+cowplot::plot_grid(plotlist = gg_insert_plots)
+
+```
+
+
+Plot Tn5 insertions relative to TSS
+```{r}
+
+get_tn5_position <- function(bam_file, yield=100000){
     
     message(Sys.time())
     
-    # Read the BAM file in 10,000 read chunks to preserve memory
-    message(str_c("Reading ", bam))
-    bam_file <- BamFile(bam, yieldSize = 10000)
-    open(bam_file)
-    bam_gr <- readGAlignments(file = bam) %>% GRanges()
-    close(bam_file)
+    # Read the BAM file in chunks to preserve memory
+    message(str_c("Reading ", bam_file))
+    
+    param <- ScanBamParam(flag = scanBamFlag(isPaired = TRUE))
+    
+    bf <- Rsamtools::BamFile(file = bam_file, yieldSize = yield)
+        open(bf)
+        gr <- NULL
+        repeat {
+                chunk <- GenomicAlignments::readGAlignments(bf, param = param)
 
+                if (length(chunk) == 0L)
+                        break
+                chunk_gr <- GenomicRanges::GRanges(chunk)
+                if (is.null(gr)) {
+                        gr <- chunk_gr
+                } else {
+                        gr <- c(gr, chunk_gr)
+                }
+        }
+        close(bf)
+    
     message("Offset alignments to Tn5 insertion sites")
-    pos <- bam_gr[strand(bam_gr) == "+"] %>% 
+    pos <- gr[strand(gr) == "+"] %>% 
+        GenomicRanges::shift(shift=4) %>%
+        resize(width = 1, fix = "start")
+    
+    neg <- gr[strand(gr) == "-"] %>%
+        GenomicRanges::shift(shift = -5) %>%
+        resize(width = 1, fix = "start")
+    
+    shift_gr <- c(pos, neg)
+    strand(shift_gr) <- "+"
+    
+    return(shift_gr)
+}
+
+tn5_grl <- lapply(X = bam_list, FUN = get_tn5_position)
+
+## Get TSS positions
+tx <- transcripts(TxDb.Hsapiens.UCSC.hg38.knownGene)
+tss <- resize(tx, width = 1, fix = "start")
+seqlevelsStyle(tss) <- "Ensembl"
+strand(tss) <- "+"
+
+
+## Calculate distance of Tn5 insertions from TSS
+calc_rel_distance <- function(gr1, gr2){
+    
+    gr2_ind <- GenomicRanges::nearest(x = gr1, subject = gr2,
+                                      ignore.strand = TRUE)
+    
+    dists <- start(gr1) - start(gr2[gr2_ind])
+    
+    return(dists)
+
+}
+
+
+all_dists <- lapply(tn5_grl, calc_rel_distance, gr2=tss)
+
+plot_tss_dists <- function(dists, title="", flank=1000){
+    
+    dists <- dists[abs(dists) <= flank]
+    
+    df <- table(dists) %>% as.data.frame()
+    df$dists <- as.character(df$dists) %>% as.numeric()
+    
+    gg_dists <- ggplot(df, aes(x = dists, y = Freq)) +
+        geom_line() +
+        ylab("Frequency") +
+        xlab("Distance from TSS") +
+        ggtitle(title) +
+        theme_bw()
+}
+
+tss_dist_plots <- lapply(all_dists, plot_tss_dists)
+
+cowplot::plot_grid(plotlist = tss_dist_plots)
+
+```
+
+
+Make Tn5 insertion-centered bed files for peak calling, and bigwig files for browser and plotting. 
+```{r}
+
+process_atac_bam <- function(bam, yield=100000){
+    
+    message(Sys.time())
+    
+    # Read the BAM file in chunks to preserve memory
+    message(str_c("Reading ", bam))
+
+    bf <- Rsamtools::BamFile(file = bam, yieldSize = yield)
+        open(bf)
+        gr <- NULL
+        repeat {
+                chunk <- GenomicAlignments::readGAlignments(bf)
+                if (length(chunk) == 0L)
+                        break
+                chunk_gr <- GenomicRanges::GRanges(chunk)
+                if (is.null(gr)) {
+                        gr <- chunk_gr
+                } else {
+                        gr <- c(gr, chunk_gr)
+                }
+        }
+        close(bf)
+    
+    message("Offset alignments to Tn5 insertion sites")
+    pos <- gr[strand(gr) == "+"] %>% 
         GenomicRanges::shift(shift=4) %>%
         resize(width = 50, fix = "start")
     
-    neg <- bam_gr[strand(bam_gr) == "-"] %>%
+    neg <- gr[strand(gr) == "-"] %>%
         GenomicRanges::shift(shift = -5) %>%
         resize(width = 50, fix = "start")
     
@@ -164,6 +325,7 @@ bam_list <- list.files("aligned_data/", pattern = "chr22.bam$",
 
 lapply(bam_list, process_atac_bam)
 ```
+
 
 
 Call peaks for each sample using macs2. This function requires you to have macs2 installed and in your PATH. 
