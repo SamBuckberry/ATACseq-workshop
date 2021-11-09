@@ -15,7 +15,8 @@ library(GenomicAlignments)
 library(GenomicFeatures)
 library(edgeR)
 library(TxDb.Hsapiens.UCSC.hg38.knownGene)
-
+library(rtracklayer)
+library(MACSr)
 
 library(UpSetR)
 library(stringr)
@@ -103,14 +104,15 @@ parallel sh ../process-atac-bam.sh {} ../reference/hg38.blacklist.bed ::: *_filt
 
 List the BAM files
 ```{r}
-bam_list <- list.files("aligned_data/", pattern = "_dedup.bam$",
+bam_list <- list.files("aligned_data/",
+                       pattern = "_filt_fastp.bam$",
                        full.names = TRUE)
 
 ids <- basename(bam_list) %>% str_remove_all("_filt_fastp_dedup.bam") %>%
     str_remove_all("Effector_")
 ```
 
-Plot insert sizes for each library
+Plot insert sizes for each library. The `plot_insert_sizes` function here will extract the mapping-determined insert sizes from the BAM files. 
 ```{r}
 
 plot_insert_sizes <- function(bam_file, title="") {
@@ -328,37 +330,40 @@ bam_list <- list.files("aligned_data/", pattern = "chr22.bam$",
 lapply(bam_list, process_atac_bam)
 ```
 
-
-
-Call peaks for each sample using macs2. This function requires you to have macs2 installed and in your PATH. 
+Call peaks for each sample using macs3 
 ```{r}
 
-atac_bed <- "aligned_data/test.bed.gz"
+# List the bed files for peak calling
+atac_bed <- list.files(path = "aligned_data/",
+                       pattern = ".bed.gz",
+                       full.names = TRUE)
 
+# Create an output directory for the peak files
 dir.create("peaks")
 
-call_macs_peaks <- function(atac_bed){
+# Create a function for calling peaks for all samples
+
+call_peaks_from_bed <- function(x){
     
-    macs_name <- basename(atac_bed) %>% 
-        str_remove(pattern = ".bed") %>%
-        str_c("peaks/", .)
+    # Set the output file basename
+    id <- basename(atac_bed[x]) %>%
+        tools::file_path_sans_ext(compression = TRUE)
     
-    cmd <- str_c("macs2 callpeak --gsize hs --nomodel --keep-dup all --name ",
-                 macs_name, " -t ", atac_bed)
-    
-    system(cmd)
+    # Call the peaks
+    callpeak(tfile = atac_bed[x],
+         gsize = "hs",
+         keepduplicates = "all",
+         nomodel = TRUE,
+         outdir = "peaks/",
+         name = id, 
+         format = "BED")
     
 }
 
-# List the atac bed files
-atac_bed_list <- list.files("aligned_data/",
-                            pattern = ".bed.gz$", full.names = TRUE)
-
 # Run the peak calling function for all of the bed files
-lapply(atac_bed_list, call_macs_peaks)
+lapply(X = 1:length(atac_bed), FUN = call_peaks_from_bed)
 
 ```
-
 
 Plot peak overlaps
 ```{r}

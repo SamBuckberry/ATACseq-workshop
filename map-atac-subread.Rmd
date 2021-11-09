@@ -41,8 +41,8 @@ buildindex(basename="reference/GRCh38_chr22",
            reference="reference/Homo_sapiens.GRCh38.dna.chromosome.22.fa.gz")
 ```
 
-
-```{r}
+Align the fastq files to the reference
+```{r, cache=TRUE}
 # Function to align reads for each sample
 align_list <- function(x, threads=1){
     

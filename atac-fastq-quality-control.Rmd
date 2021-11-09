@@ -16,7 +16,6 @@ library(ggplot2)
 
 ### FASTQ quality control and filtering
 
-
 Example (no need to run)
 ```{r, cache=TRUE, eval=FALSE}
 read1 <- "fastq/1001-Effector_CD4pos_T-S_chr22_R1.fastq.gz"
@@ -66,7 +65,7 @@ report_list <- lapply(1:nrow(fq_df), multi_fastp)
 ```
 
 Generate a table of statistics
-```{r}
+```{r, cache=TRUE}
 
 # Short function to extract summary data from fastp
 get_report <- function(x){unlist(report_list[[x]]$summary)}
