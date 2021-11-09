@@ -1,5 +1,7 @@
 # ATACseq-workshop
 
+## This workshop is under development and is currently not functional 
+
 In this workshop we will explore the major steps in ATAC-seq data analysis, including pre-analysis quality checks, alignment, peak calling, peak differential analysis, peak annotation and motif enrichment.  
 
 More advanced analyses such as nucleosome positioning and transcription factor footprinting require an in-depth exploration and may be covered in future workshops. 
