@@ -28,7 +28,6 @@ https://asia.ensembl.org/info/genome/funcgen/regulatory_build.html
 
 http://ftp.ensembl.org/pub/current_regulation/homo_sapiens/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20210107.gff.gz
 
-
 Read the peak counts
 ```{r}
 peak_counts <- read.table("processed_data/atac_peak_counts.tsv")
@@ -42,7 +41,6 @@ samples <- str_sub(string = colnames(peak_counts), start = 2, end = 5)
 samples <- str_c(samples, groups, sep = "_")
 
 ```
-
 Load counts into a DGEList
 ```{r}
 y <- DGEList(counts = peak_counts, group = groups, samples = samples)
@@ -91,21 +89,28 @@ More details for the application of this method to RNA-seq data can be found her
 ```{r, fig.height=5}
 boxplot(v$E, names=v$targets$samples)
 ```
+
+```{r}
+plotMDS(v$E)
+```
+
+
+
 If the boxplots look markedly different between samples (the above look ok), a quantile normalisation might be beneficial.
 ```{r}
 vq <- voom(counts = y, design = design, plot = TRUE,
            normalize.method = "quantile")
 ```
 
-
-
 ```{r, fig.height=5}
 boxplot(vq$E, names=v$targets$samples)
 ```
 
+```{r}
+plotMDS(vq$E)
+```
 
 ### Differential expression testing
-
 Fitting linear models in Limma
 ```{r}
 fit <- lmFit(object = v, design = design)
@@ -127,7 +132,7 @@ Empirical Bayes smoothing of standard errors (shrinks standard errors that are m
 eb <- eBayes(fit2)
 ```
 
-Check out the top differential expressed genes
+Check out the top differential peaks
 ```{r}
 topTable(eb)
 ```
@@ -142,8 +147,6 @@ How many DE peaks are there?
 ```{r}
 table(tt2$Significant)
 ```
-
-
 
 ### Differential testing summary plots
 
@@ -175,18 +178,18 @@ colnames(top_de_cpm) <- v$targets$samples
 pheatmap(top_de_cpm, scale = "row", show_rownames = FALSE)
 ```
 
-Plot normalised gene expression for top genes
+Plot normalised peak counts for top peaks
 ```{r}
-plot_gene <- function(gene_ids){
+plot_de <- function(ids){
     
     # Get the normalised expression data for the selected genes
-    dat <- v$E[rownames(v$E) %in% gene_ids, ] %>% 
+    dat <- v$E[rownames(v$E) %in% ids, ] %>% 
         data.frame()
     colnames(dat) <- v$targets$samples
     
-    # Re-shape the data into the ggplot preffered long format
-    dat <- tibble::rownames_to_column(dat, var = "gene_id") %>%
-        tidyr::gather(sample, value, -gene_id)
+    # Re-shape the data into the ggplot preferred long format
+    dat <- tibble::rownames_to_column(dat, var = "id") %>%
+        tidyr::gather(sample, value, -id)
     
     # Add the group data
     dat$group <- v$targets$group[match(dat$sample, v$targets$samples)]
@@ -194,22 +197,18 @@ plot_gene <- function(gene_ids){
     # plot the gene expression vaues
     ggplot(data = dat, aes(x = group, y = value)) + 
         geom_point(size=3, alpha=0.5) +
-        facet_wrap(~gene_id, scales = "free_y") +
-        ylab("Normalised gene expression") +
+        facet_wrap(~id, scales = "free_y") +
+        ylab("Normalised counts") +
         theme_bw()
         
 }
 
-my_top_genes <- rownames(tt2)[tt2$Significant == TRUE][1:6]
+my_top_peaks <- rownames(tt2)[tt2$Significant == TRUE][1:6]
 
-plot_gene(gene_ids = my_top_genes)
-
+plot_de(ids = my_top_peaks)
 ```
 
-
-
 ### Annotate differential peaks
-
 Get the significant peaks up- and down-regulated into GRanges objects
 ```{r}
 sig_peaks_up <- rownames(tt2)[tt2$Significant == TRUE & tt2$logFC > 0] %>%
@@ -259,7 +258,6 @@ head(all_peaks_annot)
 
 Plot the peak annotations
 ```{r}
-
 gg_annot <- ggplot(all_peaks_annot, aes(x = direction, fill=feature)) +
     geom_bar() + theme_bw()
 
