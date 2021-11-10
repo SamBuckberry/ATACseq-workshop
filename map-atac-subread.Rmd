@@ -17,14 +17,14 @@ Write a function to align all samples. Here the inputs are the `.fastq.gz` files
 ```{r}
 # function to align all samples
 
-r1_list <- list.files("fastq/", pattern = "_R1.fastq.gz",
+r1_list <- list.files("fastq/", pattern = "_filt_fastp_R1.fastq.gz",
                       full.names = TRUE)
 
-r2_list <- list.files("fastq/", pattern = "_R2.fastq.gz",
+r2_list <- list.files("fastq/", pattern = "_filt_fastp_R2.fastq.gz",
                       full.names = TRUE)
 
 bam_list <- basename(r1_list) %>%
-    str_replace("_R1.fastq.gz", ".bam")
+    str_replace("_filt_fastp_R1.fastq.gz", ".bam")
 
 dir.create("aligned_data")
 bam_list <- str_c("aligned_data/", bam_list)
@@ -42,9 +42,9 @@ buildindex(basename="reference/GRCh38_chr22",
 ```
 
 Align the fastq files to the reference
-```{r, cache=TRUE}
+```{r, cache=TRUE, echo=FALSE}
 # Function to align reads for each sample
-align_list <- function(x, threads=1){
+align_list <- function(x, threads=2){
     
     align(index="reference/GRCh38_chr22",
           type = "dna",
