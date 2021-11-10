@@ -109,12 +109,12 @@ plot_insert_sizes(bam_file = bam_list[1])
 ```
 
 Or on the log scale, which emphasises mono, di-nucleosome spanning reads
-```{r}
+```{r, cache=TRUE}
 plot_insert_sizes(bam_file = bam_list[1], log_scale = TRUE)
 ```
 
 And now make a plot of insert sizes with all samples together
-```{R}
+```{r, cache=TRUE}
 gg_insert_plots <- lapply(1:length(bam_list),
                           function(x){plot_insert_sizes(bam_file = bam_list[x],
                                                         log_scale = FALSE,
@@ -220,9 +220,16 @@ cowplot::plot_grid(plotlist = tss_dist_plots)
 Now we can use the Tn5 insertion sites to make insertion-centered bed files for peak calling, and bigwig files for browser and plotting. By making the BED files in this way, we can centre the data on the Tn5 insertion sites which are the accessible chromatin regions. Peak callers typically accept BAM files, but the read is not strictly indicative of the accessible region, only the 5' end is. This will enable more accurate peak definition. 
 
 The function below will make the Tn5 insertion centered BED files and bigwig files from the BAM files for downstream analyses. Note that we also normalise the bigwig file by sequencing depth, so counts are represented as counts per million (CPM), allowing for comparisons between samples.
-```{r}
 
-process_atac_bam <- function(bam, yield=100000){
+Within this function, we also filter for reads mapping to the mitochondrial genome and those mapping to blacklisted regions. For more information on blacklisted regions of the genome, see https://www.nature.com/articles/s41598-019-45839-z.  
+Blacklist for hg38 was downloaded from here http://mitra.stanford.edu/kundaje/akundaje/release/blacklists/hg38-human/
+
+**Note:** The example data here are for chromosome 22, and hence there are no mitochondrial sequences in this test dataset. Additionally, chr22 does not have any blacklisted regions so no data will be filtered. However, this is an important step when analysing a full dataset. 
+```{r, cache=TRUE}
+
+process_atac_bam <- function(bam, mito_ids=c("chrM", "MT"), blacklist=TRUE,
+                             blacklist_path="reference/hg38.blacklist.bed",
+                             yield=100000){
     
     message(Sys.time())
     
@@ -245,6 +252,29 @@ process_atac_bam <- function(bam, yield=100000){
         }
         close(bf)
     
+    message("Filtering mitochondrial sequences")
+    gr <- gr[!seqnames(gr) %in% mito_ids]    
+    
+    message("Filtering blacklist regions")
+    if (blacklist==TRUE){
+        
+        # Load the blacklist data
+        bl_dat <- read.table(blacklist_path)
+        blacklist_gr <- GRanges(seqnames = bl_dat[ ,1],
+                                ranges = IRanges(start = bl_dat[ ,2],
+                                                 end = bl_dat[ ,3]))
+        
+        # Ensure blacklist and granges have same seqlevels style
+        seqlevelsStyle(blacklist_gr) <- seqlevelsStyle(gr)[1]
+        
+        # Filter the blacklist reads
+        pre_len <- length(gr)
+        gr <- gr[!overlapsAny(gr, blacklist_gr)]
+        post_len <- length(gr)
+        filtered_reads <- pre_len - post_len
+        message(str_c(filtered_reads, " blacklist reads filtered"))
+    }
+
     message("Offset alignments to Tn5 insertion sites")
     pos <- gr[strand(gr) == "+"] %>% 
         GenomicRanges::shift(shift=4) %>%
@@ -298,7 +328,7 @@ lapply(bam_list, process_atac_bam)
 ```
 
 now using the BED files we created for each sample in the last step, we now call peaks for each sample using MACS3. All outputs from the peak caller will be saved in the folder `peaks/`
-```{r}
+```{r, cache=TRUE}
 
 # List the bed files for peak calling
 atac_bed <- list.files(path = "aligned_data/",
@@ -334,7 +364,7 @@ pk_logs <- lapply(X = 1:length(atac_bed), FUN = call_peaks_from_bed)
 ```
 
 Let's have a look at the list of peak files
-```{r}
+```{r, cache=TRUE}
 peak_fls <- list.files("peaks/", pattern = ".narrowPeak", full.names = TRUE)
 ```
 
@@ -357,18 +387,18 @@ peak_to_gr <- function(peak_file){
 ```
 
 
-```{r}
+```{r, cache=TRUE}
 peak_grl <- lapply(peak_fls, peak_to_gr) %>% GRangesList()
 names(peak_grl) <- basename(peak_fls)
 ```
 
 First, let's count how many peaks were called for each sample?
-```{r}
+```{r, cache=TRUE}
 lengths(peak_grl)
 ```
 
 How wide are these peaks?
-```{r}
+```{r, cache=TRUE}
 get_peak_widths <- function(x){
     
     peak_widths <- width(peak_grl[[x]]) %>% as.numeric()
@@ -389,7 +419,7 @@ gg_width_hist
 ```
 
 How many peaks overlap between samples? Let's make an UpSet plot to inspect the overlaps
-```{r}
+```{r, cache=TRUE}
 # Make a union peak set for comparing overlaps
 union_peak_gr <- unlist(peak_grl) %>% GenomicRanges::reduce()
 
@@ -414,7 +444,7 @@ upset(data = peak_hits, ncol(peak_hits), nintersects = 16)
 ```
 
 Save the union peak set as a bed file (to inspect later)
-```{r}
+```{r, cache=TRUE}
 gr_to_bed <- function(gr, out_path){
         dat <- as.data.frame(gr)[ ,1:3]
         dat$name <- "."
@@ -431,7 +461,7 @@ gr_to_bed(gr = union_peak_gr, out_path = "processed_data/atac_union_peaks.bed")
 This presence/absence calling of peaks does not give us a lot of information, as some samples may have less noise, and more power for detecting peaks. For this reason, it is a good idea to get a normalised measure of reads in peaks, and then compare samples. 
 
 Calculate number of reads (Tn5 insertions) in peaks for each sample using`.bed` files we used for the peak calling
-```{r}
+```{r, cache=TRUE}
 
 # Function to calculate read overlaps. Returns a matrix of counts
 calc_read_peak_olaps <- function(bed_file_list, peak_set){
@@ -480,9 +510,8 @@ colnames(peak_counts) <- colnames(peak_counts) %>%
 head(peak_counts)
 ```
 
-
 Save the peak counts table
-```{r}
+```{r, cache=TRUE}
 dir.create("processed_data")
 write.table(x = peak_counts, "processed_data/atac_peak_counts.tsv",
             quote = FALSE, row.names = TRUE, col.names = TRUE, sep = "\t")
@@ -490,7 +519,7 @@ write.table(x = peak_counts, "processed_data/atac_peak_counts.tsv",
 
 
 Calculate reads in peaks and plot
-```{r}
+```{r, cache=TRUE}
 peak_count_sums <- colSums(peak_counts)
 
 qplot(y=peak_count_sums, x=names(peak_count_sums), geom="col") +
@@ -498,7 +527,7 @@ qplot(y=peak_count_sums, x=names(peak_count_sums), geom="col") +
 ```
 
 Calculate Fraction of reads in peaks (FRiP) and plot 
-```{r}
+```{r, cache=TRUE}
 count_file_lines <- function(bed_path){
     con <- gzfile(bed_path) 
     counts <- length(readLines(con))
@@ -518,19 +547,19 @@ qplot(y=FRiP, x=names(FRiP), geom="col") +
 Now lets look at how the samples compare with respect to normalised read counts in peaks. If we want to do differential accessability analyses, there plots will further help us evaluate our data. 
 
 Calculate length-normalised, and library size normalised peak counts for plotting
-```{r}
+```{r, cache=TRUE}
 peak_rpkm <- rpkm(peak_counts, gene.length = width(union_peak_gr),
                   log = TRUE, prior.count = 1)
 
 ```
 
 Boxplot peak rpkm
-```{r}
+```{r, cache=TRUE}
 boxplot(peak_rpkm)
 ```
 
 Let's check how the samples look in a PCA
-```{r}
+```{r, cache=TRUE}
 plot_pca <- function(mat, dim1=1, dim2=2, scale=TRUE){
         
         # Remove incomplete cases
@@ -571,7 +600,7 @@ Here we see some variance in the read count distributions between libraries, and
 In these cases, removing peaks with low counts and between-sample normalisaion often helps. 
 
 Filter low-count peaks and plot PCA. Here we will try filtering for peaks with RPKM > 4 in at least 2 samples
-```{r}
+```{r, cache=TRUE}
 keep <- rowSums(peak_counts > 5) > 3
 table(keep)
 
@@ -584,7 +613,7 @@ plot_pca(peak_filt_rpkm)
 Here we see that PC2 seperates the treatment and control groups. 
 
 And now with quantile normalisation
-```{r}
+```{r, cache=TRUE}
 peak_filt_rpkm_norm <- normalizeBetweenArrays(peak_filt_rpkm, method = "quantile")
 plot_pca(peak_filt_rpkm_norm)
 ```
