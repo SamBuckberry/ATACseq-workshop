@@ -7,10 +7,13 @@ BiocManager::install(version = "3.14")
 
 bioc_packages <- c('QuasR', 'Rsubread', 'GenomicRanges', 'GenomicAlignments',
                    'GenomicFeatures', 'Rsamtools', 'rtracklayer', 'Rfastp',
-                   'edgeR', 'limma', 'ggbio', 'TxDb.Hsapiens.UCSC.hg38.knownGene',
+                   'edgeR', 'limma', 'ggbio',
+                   'TxDb.Hsapiens.UCSC.hg38.knownGene',
                    'wiggleplotr', 'gprofiler2', 'biomaRt', 'ensembldb',
-                   'EnsDb.Hsapiens.v86', "MACSr")
+                   'EnsDb.Hsapiens.v86', 'basilisk', 'MACSr')
 
+BiocManager::install('basilisk', force = TRUE)
+BiocManager::install('MACSr', force = TRUE)
 BiocManager::install(bioc_packages)
 
 ### Install from CRAN using bioc to ensure version compatability
