@@ -16,23 +16,6 @@ library(ggplot2)
 
 ### FASTQ quality control and filtering
 
-Example (no need to run)
-```{r, cache=TRUE, eval=FALSE}
-read1 <- "fastq/1001-Effector_CD4pos_T-S_chr22_R1.fastq.gz"
-read2 <- "fastq/1001-Effector_CD4pos_T-S_chr22_R2.fastq.gz"
-
-out_prefix <- str_replace(string = read1,
-                          pattern = "_R1.fastq.gz",
-                          replacement = "_filt_fastp")
-
-fastp_json_report <- rfastp(read1 = read1, read2 = read2, 
-                            outputFastq = out_prefix,
-                            adapterTrimming = TRUE,
-                            cutLowQualTail = TRUE,
-                            cutLowQualFront = TRUE,
-                            thread = 1)
-```
-
 Write a function to process all the samples. 
 ```{r, cache=TRUE, message=FALSE}
 r1_list <- list.files(path = "fastq/",
@@ -54,8 +37,6 @@ multi_fastp <- function(x){
                                 read2 = fq_df$r2[x], 
                             outputFastq = fq_df$prefix[x],
                             adapterTrimming = TRUE,
-                            cutLowQualTail = TRUE,
-                            cutLowQualFront = TRUE,
                             thread = 2)
     return(fastp_json_report)
 }
@@ -85,7 +66,7 @@ datatable(data = report_table)
 ```
 
 Make some plots of the statistics
-```{r}
+```{r, cache=TRUE}
 cp_list <- lapply(X = 1:length(report_list),
                   FUN = function(x){curvePlot(report_list[[x]]) + ggtitle(fq_df$prefix[x])})
 cp_list
