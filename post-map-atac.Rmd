@@ -413,6 +413,20 @@ upset(data = peak_hits, ncol(peak_hits), nintersects = 16)
 
 ```
 
+Save the union peak set as a bed file (to inspect later)
+```{r}
+gr_to_bed <- function(gr, out_path){
+        dat <- as.data.frame(gr)[ ,1:3]
+        dat$name <- "."
+        dat$score <- "."
+        dat$strand <- strand(gr)
+        write.table(x = dat, file = out_path, quote = FALSE, sep = "\t",
+                    row.names = FALSE, col.names = FALSE)
+}
+
+gr_to_bed(gr = union_peak_gr, out_path = "processed_data/atac_union_peaks.bed")
+```
+
 
 This presence/absence calling of peaks does not give us a lot of information, as some samples may have less noise, and more power for detecting peaks. For this reason, it is a good idea to get a normalised measure of reads in peaks, and then compare samples. 
 

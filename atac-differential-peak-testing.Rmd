@@ -9,13 +9,14 @@ output: html_document
 ---
 
 ```{r}
-# BioC packages
 library(GenomicRanges)
 library(GenomicAlignments)
 library(edgeR)
 library(ggbio)
-
-# CRAN packages
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(monaLisa)
+library(JASPAR2020)
+library(TFBSTools)
 library(stringr)
 library(magrittr)
 library(ggplot2)
@@ -23,10 +24,6 @@ library(ggrepel)
 library(pheatmap)
 library(tidyr)
 ```
-
-https://asia.ensembl.org/info/genome/funcgen/regulatory_build.html
-
-http://ftp.ensembl.org/pub/current_regulation/homo_sapiens/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20210107.gff.gz
 
 Read the peak counts
 ```{r}
@@ -218,7 +215,12 @@ sig_peaks_down <- rownames(tt2)[tt2$Significant == TRUE & tt2$logFC < 0] %>%
     GRanges()
 ```
 
-Import ENCODE regulatory elements data
+Import ENCODE regulatory elements data. Data were obtained through the following sources. 
+
+https://asia.ensembl.org/info/genome/funcgen/regulatory_build.html
+
+http://ftp.ensembl.org/pub/current_regulation/homo_sapiens/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20210107.gff.gz
+
 ```{r}
 reg_gr <- rtracklayer::import("reference/homo_sapiens.GRCh38.Regulatory_Build.regulatory_features.20210107.gff.gz", format = "gff")
 ```
@@ -276,6 +278,48 @@ gg_annot_prop <- ggplot(all_peaks_annot, aes(x = direction, fill=feature)) +
     theme_bw()
 
 gg_annot_prop
+
+```
+
+## Motif enrichment testing
+
+Note: this section can consume significant computational resources, and depending on your computer, it may take a while, or crash. 
+```{r}
+# Change the seqnames style to be compatable with the BSgenome object
+seqlevelsStyle(sig_peaks_up) <- "UCSC"
+seqlevelsStyle(sig_peaks_down) <- "UCSC"
+
+peaks_up_seqs <- getSeq(BSgenome.Hsapiens.UCSC.hg38, sig_peaks_up)
+
+pwms <- getMatrixSet(JASPAR2020,
+                     opts = list(matrixtype = "PWM",
+                                 tax_group = "vertebrates"))
+
+# reduce peaks to same size for motif calling. Better to split into windows of same size, but doing it the way to help it run faster. 
+peaks_up_reduce <- resize(sig_peaks_up, width = 100, fix = 'center')
+
+# Get the DNA sequences for the peaks
+peaks_up_seqs <- getSeq(BSgenome.Hsapiens.UCSC.hg38, peaks_up_reduce)
+
+# Get the DNA sequence of chr22 as genomic background for enrichment tests. 
+chr22_seq <- readDNAStringSet(filepath = "reference/Homo_sapiens.GRCh38.dna.chromosome.22.fa.gz")
+
+# Calculate the motif enrichments
+se <- calcBinnedMotifEnrR(seqs = peaks_up_seqs, pwmL = pwms,
+                          genome.oversample = 1,
+                          background = "genome", genome = chr22_seq)
+
+# Reduce to most significant motif hits
+sel <- apply(assay(se, "negLog10Padj"), 1, 
+             function(x) max(abs(x), 0, na.rm = TRUE)) > 1
+sum(sel)
+
+seSel <- se[sel, ]
+
+# plot heatmap of mofifs
+plotMotifHeatmaps(x = seSel, which.plots = c("log2enr", "negLog10Padj"), 
+                  width = 2.0, cluster = TRUE, maxEnr = 2, maxSig = 10, 
+                  show_motif_GC = TRUE)
 
 ```
 

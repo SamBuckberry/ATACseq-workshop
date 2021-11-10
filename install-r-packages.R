@@ -10,10 +10,10 @@ bioc_packages <- c('QuasR', 'Rsubread', 'GenomicRanges', 'GenomicAlignments',
                    'edgeR', 'limma', 'ggbio',
                    'TxDb.Hsapiens.UCSC.hg38.knownGene',
                    'wiggleplotr', 'gprofiler2', 'biomaRt', 'ensembldb',
-                   'EnsDb.Hsapiens.v86', 'basilisk', 'MACSr')
+                   'EnsDb.Hsapiens.v86', 'basilisk', 'MACSr',
+                   'BSgenome.Hsapiens.UCSC.hg38', 'monaLisa', 'JASPAR2020',
+                   'TFBSTools')
 
-BiocManager::install('basilisk', force = TRUE)
-BiocManager::install('MACSr', force = TRUE)
 BiocManager::install(bioc_packages)
 
 ### Install from CRAN using bioc to ensure version compatability
