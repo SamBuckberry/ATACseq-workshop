@@ -28,34 +28,43 @@ In this workshop, example datasets have beed obtained from Calderon et al. (2019
 ===
 
 ### ATAC-seq pre-alignment
-This section covers:
-- FASTQ file quality assessment
-- Read filtering and trimming for adapters and low-quality base calls
+This section covers:  
+
+- FASTQ file quality assessment  
+- Read filtering and trimming for adapters and low-quality base calls  
+
+**Note:** One thing to keep in mind with ATAC-seq read quality trimming is that you do not want to trim the 5' ends of the reads, as 5' end is used to determine the Tn5 insertion sites. 
+
 
 Follow the workflow in the [atac-fastq-quality-control.Rmd](atac-fastq-quality-control.Rmd)
 
 ### ATAC-seq alignment
-This section covers:
+This section covers:  
 
-- Build an alignment index from reference genome (FASTA files)
-- Align fastq files to reference index
-- Inspect alignment statistics
+- Build an alignment index from reference genome (FASTA files)  
+- Align fastq files to reference index  
+- Inspect alignment statistics  
 
 Follow the workflow in the [map-atac-subread.Rmd](map-atac-subread.Rmd)
 
+**Note:** HISAT2 and Bowtie2 are very good and fast aligners for ATAC-seq data, and have pre-compiled indexes available for many model species.  
+
+
 ### ATAC-seq post-alignment
-- Inspect insert-size histogram
-- Inspect Tn5 enrichment at TSS
-- Create Tn5 insertion-centered BED and bigiwg files
-- Call peaks
-- Inspect normalised peak counts in peaks and compare samples
+- Inspect insert-size histogram  
+- Inspect Tn5 enrichment at TSS  
+- Remove mitochondrial and blacklist sequences
+- Create Tn5 insertion-centered BED and bigwig files  
+- Call peaks  
+- Calculate fraction of reads in peaks
+- Inspect normalised peak counts and compare samples  
 
 Follow the workflow in the [post-map-atac.Rmd](post-map-atac.Rmd)
 
 ### Differential peak analysis
-- Identify differential peaks
-- Annotate differential peaks
-- Test for enriched sequence motifs in differential peaks
+- Identify differential peaks  
+- Annotate differential peaks  
+- Test for enriched sequence motifs in differential peaks  
 
 Follow the workflow in the [atac-differential-peak-testing.Rmd](atac-differential-peak-testing.Rmd)
 
