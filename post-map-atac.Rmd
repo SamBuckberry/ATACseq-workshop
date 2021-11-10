@@ -26,103 +26,46 @@ library(ggrepel)
 ```
 
 ### Post-alignment processing
-Much of the post-alignment processing is done with `samtools` outside of R. While some of this is possible with the `Rsamtools` package, it is much more efficient to write a short shell script with the following steps. 
+- Plot insert size histograms
+- Create GRanges object of Tn5 insertion sites
+- Remove chrM and blacklist genomic regions
+- Create bigwig files
+- Call ATAC-seq peaks
+- Calculate reads in peaks
 
-- Filter reads of mitochondrial data
-- Filter for 'proper' read pairs
-- Sort the alignments
-- Index the alignments
-- Remove PCR duplicates
-
-Here are the lines of code for each step:
-
-Remove mitochondrial mapped reads
-```{bash, eval=FALSE}
-samtools idxstats my_atac.bam | cut -f 1 | grep -v chrM | xargs samtools view -b my_atac.bam > my_atac_filtered.bam
-
-```
-
-Remove reads mapped to blacklisted regions
-http://mitra.stanford.edu/kundaje/akundaje/release/blacklists/
-
-Sort the alignments
-```{bash, eval=FALSE}
-samtools sort my_atac_filtered.bam > my_atac_filtered_sorted.bam
-```
-
-Index the sorted alignments
-```{bash, eval=FALSE}
-samtools index my_atac_filtered_sorted.bam
-```
-
-Remove PCR duplicates
-```{bash, eval=FALSE}
-samtools dedup my_atac_filtered_sorted.bam > my_atac_dedup.bam
-```
-
-And we can put that all together in a shell script like this
-```{bash, eval=FALSE}
-#!/bin/bash
-
-# File inputs
-bam=$1
-blacklist=$2
-
-prefix=$(basename "$bam" .bam)
-
-# Filter for nuclear genome
-samtools idxstats "$bam" | cut -f 1 | grep -v \* | grep -v MT | grep -v chrM | xargs samtools view -b "$bam" > "$prefix"_nuclear.bam
-
-# Remove blacklisted mapped reads
-samtools view -L "$blacklist" -U "$prefix"_filtered.bam -b "$prefix"_nuclear.bam > "$prefix".blacklist.bam
-
-# Sort the BAM file
-samtools sort "$prefix"_filtered.bam > "$prefix"_sorted.bam
-
-# Index the sorted alignments
-samtools index "$prefix"_sorted.bam
-
-# Remove the PCR duplicates
-samtools rmdup "$prefix"_sorted.bam "$prefix"_dedup.bam
-
-# Index the dedup BAM file
-samtools index "$prefix"_dedup.bam
-
-# Clean up the intermediate files
-rm "$prefix"_filtered.bam "$prefix"_sorted.bam "$prefix"_sorted.bam.bai "$prefix".blacklist.bam 
-
-```
-
-
-We can then run that script in parallel to process all the BAM files
-```{bash}
-cd aligned data
-
-parallel sh ../process-atac-bam.sh {} ../reference/hg38.blacklist.bed ::: *_filt_fastp.bam
-
-```
-
-List the BAM files
-```{r}
+First, list the ATAC-seq BAM files
+```{r, cache=TRUE}
 bam_list <- list.files("aligned_data/",
-                       pattern = "_filt_fastp.bam$",
+                       pattern = ".bam$",
                        full.names = TRUE)
+```
 
-ids <- basename(bam_list) %>% str_remove_all("_filt_fastp_dedup.bam") %>%
-    str_remove_all("Effector_")
+And now index the bam files
+```{r, cache=TRUE}
+lapply(bam_list, indexBam)
+```
+
+And create sample IDs based on shortened file names
+```{r, cache=TRUE}
+ids <- basename(bam_list) %>%
+    str_remove_all("_filt_fastp_chr22_dedup.bam") %>%
+    str_remove_all("-Effector_CD4pos")
 ```
 
 Plot insert sizes for each library. The `plot_insert_sizes` function here will extract the mapping-determined insert sizes from the BAM files. 
-```{r}
-
-plot_insert_sizes <- function(bam_file, title="") {
+```{r, cache=TRUE}
+plot_insert_sizes <- function(bam_file, log_scale=FALSE, title="") {
     
-    # Check if BAM file is paired end
+    # Checks
     stopifnot(testPairedEndBam(file = bam_file))
+    
+    stopifnot(class(log_scale)=="logical")
+    stopifnot(length(log_scale)==1)
     
     # Setup the filtering parameters for the BAM file
     param <- ScanBamParam(what=c('isize'),
                           flag = scanBamFlag(isSecondaryAlignment = FALSE,
+                                             isDuplicate = FALSE,
                                              isUnmappedQuery=FALSE,
                                              isNotPassingQualityControls = FALSE))
     
@@ -135,32 +78,53 @@ plot_insert_sizes <- function(bam_file, title="") {
     # Limit width to 1000 bases for plotting
     df <- df[df$x < 1000, ]
     
+    gg_insert <- NULL
+    
+    if (log_scale==TRUE){
+        
+    gg_insert <- ggplot(df, aes(x = x, y = y)) + 
+        geom_line() + 
+        scale_y_log10() +
+        xlab("Fragment length (bp)") +
+        ylab("Fragment counts (log10)") +
+        ggtitle(title) +
+        theme_bw()
+    } else if (log_scale==FALSE){
     gg_insert <- ggplot(df, aes(x = x, y = y)) + 
         geom_line() + 
         xlab("Fragment length (bp)") +
         ylab("Fragment counts") +
         ggtitle(title) +
         theme_bw()
+    }
+
     
     return(gg_insert)
 }
-
-
-# Plot insert sizes for first BAM file
-plot_insert_sizes(bam_list[1])
-
-
-# Plot all BAMs together
-gg_insert_plots <- lapply(1:length(bam_list),
-                          function(x){plot_insert_sizes(bam_list[x], ids[x])})
-
-cowplot::plot_grid(plotlist = gg_insert_plots)
-
 ```
 
+Plot insert sizes for first BAM file
+```{r, cache=TRUE}
+plot_insert_sizes(bam_file = bam_list[1])
+```
 
-Plot Tn5 insertions relative to TSS
+Or on the log scale, which emphasises mono, di-nucleosome spanning reads
 ```{r}
+plot_insert_sizes(bam_file = bam_list[1], log_scale = TRUE)
+```
+
+And now make a plot of insert sizes with all samples together
+```{R}
+gg_insert_plots <- lapply(1:length(bam_list),
+                          function(x){plot_insert_sizes(bam_file = bam_list[x],
+                                                        log_scale = FALSE,
+                                                        title = ids[x])})
+
+cowplot::plot_grid(plotlist = gg_insert_plots)
+```
+
+Now we get the Tn5 insert positions from the BAM files and load these into a GRangesList object
+```{r, cache=TRUE}
 
 get_tn5_position <- function(bam_file, yield=100000){
     
@@ -169,7 +133,7 @@ get_tn5_position <- function(bam_file, yield=100000){
     # Read the BAM file in chunks to preserve memory
     message(str_c("Reading ", bam_file))
     
-    param <- ScanBamParam(flag = scanBamFlag(isPaired = TRUE))
+    param <- ScanBamParam(flag = scanBamFlag(isPaired = TRUE, isDuplicate = FALSE))
     
     bf <- Rsamtools::BamFile(file = bam_file, yieldSize = yield)
         open(bf)
@@ -200,17 +164,20 @@ get_tn5_position <- function(bam_file, yield=100000){
     shift_gr <- c(pos, neg)
     strand(shift_gr) <- "+"
     
+    message("Done!")
     return(shift_gr)
 }
 
 tn5_grl <- lapply(X = bam_list, FUN = get_tn5_position)
+```
 
+Plot Tn5 insertions relative to transcription start sites (TSS). What we are looking for here is strong enrichment of signal at TSS, as these are areas of the genome which are typically characteried as assessible chromatin regions.
+```{r, cache=TRUE}
 ## Get TSS positions
 tx <- transcripts(TxDb.Hsapiens.UCSC.hg38.knownGene)
 tss <- resize(tx, width = 1, fix = "start")
 seqlevelsStyle(tss) <- "Ensembl"
 strand(tss) <- "+"
-
 
 ## Calculate distance of Tn5 insertions from TSS
 calc_rel_distance <- function(gr1, gr2){
@@ -227,6 +194,7 @@ calc_rel_distance <- function(gr1, gr2){
 
 all_dists <- lapply(tn5_grl, calc_rel_distance, gr2=tss)
 
+# PLot the distance to the TSS for each sample
 plot_tss_dists <- function(dists, title="", flank=1000){
     
     dists <- dists[abs(dists) <= flank]
@@ -249,7 +217,9 @@ cowplot::plot_grid(plotlist = tss_dist_plots)
 ```
 
 
-Make Tn5 insertion-centered bed files for peak calling, and bigwig files for browser and plotting. 
+Now we can use the Tn5 insertion sites to make insertion-centered bed files for peak calling, and bigwig files for browser and plotting. By making the BED files in this way, we can centre the data on the Tn5 insertion sites which are the accessible chromatin regions. Peak callers typically accept BAM files, but the read is not strictly indicative of the accessible region, only the 5' end is. This will enable more accurate peak definition. 
+
+The function below will make the Tn5 insertion centered BED files and bigwig files from the BAM files for downstream analyses. Note that we also normalise the bigwig file by sequencing depth, so counts are represented as counts per million (CPM), allowing for comparisons between samples.
 ```{r}
 
 process_atac_bam <- function(bam, yield=100000){
@@ -324,13 +294,10 @@ process_atac_bam <- function(bam, yield=100000){
         
 }
 
-bam_list <- list.files("aligned_data/", pattern = "chr22.bam$",
-                       full.names = TRUE)
-
 lapply(bam_list, process_atac_bam)
 ```
 
-Call peaks for each sample using macs3 
+now using the BED files we created for each sample in the last step, we now call peaks for each sample using MACS3. All outputs from the peak caller will be saved in the folder `peaks/`
 ```{r}
 
 # List the bed files for peak calling
@@ -350,7 +317,7 @@ call_peaks_from_bed <- function(x){
         tools::file_path_sans_ext(compression = TRUE)
     
     # Call the peaks
-    callpeak(tfile = atac_bed[x],
+    pk <- callpeak(tfile = atac_bed[x],
          gsize = "hs",
          keepduplicates = "all",
          nomodel = TRUE,
@@ -358,18 +325,24 @@ call_peaks_from_bed <- function(x){
          name = id, 
          format = "BED")
     
+    return(pk)
 }
 
 # Run the peak calling function for all of the bed files
-lapply(X = 1:length(atac_bed), FUN = call_peaks_from_bed)
+pk_logs <- lapply(X = 1:length(atac_bed), FUN = call_peaks_from_bed)
 
 ```
 
-Plot peak overlaps
+Let's have a look at the list of peak files
 ```{r}
 peak_fls <- list.files("peaks/", pattern = ".narrowPeak", full.names = TRUE)
+```
 
-# Function to read peak files
+
+Now we have the peaks for each sample called, let's see how they a look.
+
+First, we need to read the peak files into a GRangesList
+```{r, cache=TRUE}
 peak_to_gr <- function(peak_file){
     
     dat <- read.table(peak_file)
@@ -385,19 +358,16 @@ peak_to_gr <- function(peak_file){
 
 
 ```{r}
-# Make GRangesList of peaks for all samples
 peak_grl <- lapply(peak_fls, peak_to_gr) %>% GRangesList()
 names(peak_grl) <- basename(peak_fls)
-
 ```
 
-
-How many peaks detected for each sample?
+First, let's count how many peaks were called for each sample?
 ```{r}
 lengths(peak_grl)
 ```
 
-How wide are the peaks?
+How wide are these peaks?
 ```{r}
 get_peak_widths <- function(x){
     
@@ -418,7 +388,7 @@ gg_width_hist <- ggplot(data = peak_widths, aes(x = width)) +
 gg_width_hist
 ```
 
-How many peaks overlap between samples?
+How many peaks overlap between samples? Let's make an UpSet plot to inspect the overlaps
 ```{r}
 # Make a union peak set for comparing overlaps
 union_peak_gr <- unlist(peak_grl) %>% GenomicRanges::reduce()
@@ -429,7 +399,7 @@ peak_hits <- lapply(peak_grl, function(x){overlapsAny(union_peak_gr, x)})
 # Create a matrix of TRUE/FALSE for peak overlaps
 peak_hits <- do.call(cbind, peak_hits)
 colnames(peak_hits) <- names(peak_grl) %>%
-    str_remove("_chr22_atac.gz_peaks.narrowPeak")
+    str_remove("_filt_fastp_chr22_dedup_atac_peaks.narrowPeak")
 rownames(peak_hits) <- as.character(union_peak_gr) 
 
 # Convert the TRUE/FALSE values into 1/0 
@@ -446,12 +416,24 @@ upset(data = peak_hits, ncol(peak_hits), nintersects = 16)
 
 This presence/absence calling of peaks does not give us a lot of information, as some samples may have less noise, and more power for detecting peaks. For this reason, it is a good idea to get a normalised measure of reads in peaks, and then compare samples. 
 
-Calculate number of reads (Tn5 insertions) in peaks for each sample using`.bed` fileswe used for the peak calling
+Calculate number of reads (Tn5 insertions) in peaks for each sample using`.bed` files we used for the peak calling
 ```{r}
 
 # Function to calculate read overlaps. Returns a matrix of counts
 calc_read_peak_olaps <- function(bed_file_list, peak_set){
     
+    
+    ##### A function that imports a bed file to a GRanges object
+    # Only takes the first 3 columns from a bed file
+    bed_to_gr <- function(bed_path){
+            dat <- read.table(bed_path, sep = "\t", header = FALSE)
+            gr <- GRanges(seqnames = dat$V1,
+                      ranges = IRanges(start = dat$V2,
+                                       end = dat$V3))
+        return(gr)
+        
+    }
+
     
     get_olaps <- function(bed_file){
         
@@ -474,11 +456,12 @@ calc_read_peak_olaps <- function(bed_file_list, peak_set){
 
 }
 
-peak_counts <- calc_read_peak_olaps(bed_file_list = atac_bed_list,
+peak_counts <- calc_read_peak_olaps(bed_file_list = atac_bed,
                                     peak_set = union_peak_gr)
 
 # Trim down the column names
-colnames(peak_counts) <- colnames(peak_counts) %>% str_remove("_chr22_atac.bed.gz")
+colnames(peak_counts) <- colnames(peak_counts) %>%
+    str_remove("_filt_fastp_chr22_dedup_atac.bed.gz")
 
 head(peak_counts)
 ```
@@ -492,7 +475,6 @@ write.table(x = peak_counts, "processed_data/atac_peak_counts.tsv",
 ```
 
 
-
 Calculate reads in peaks and plot
 ```{r}
 peak_count_sums <- colSums(peak_counts)
@@ -503,13 +485,14 @@ qplot(y=peak_count_sums, x=names(peak_count_sums), geom="col") +
 
 Calculate Fraction of reads in peaks (FRiP) and plot 
 ```{r}
-
-get_read_counts <- function(x){
-    dat <- read.table(atac_bed_list[x])
-    return(nrow(dat))
+count_file_lines <- function(bed_path){
+    con <- gzfile(bed_path) 
+    counts <- length(readLines(con))
+    close(con)
+    return(counts)
 }
 
-lib_sizes <- lapply(1:length(atac_bed_list), get_read_counts) 
+lib_sizes <- lapply(atac_bed, count_file_lines) 
 lib_sizes <- unlist(lib_sizes)
 
 FRiP <- peak_count_sums / lib_sizes
@@ -517,6 +500,8 @@ FRiP <- peak_count_sums / lib_sizes
 qplot(y=FRiP, x=names(FRiP), geom="col") +
     coord_flip() + theme_bw()
 ```
+
+Now lets look at how the samples compare with respect to normalised read counts in peaks. If we want to do differential accessability analyses, there plots will further help us evaluate our data. 
 
 Calculate length-normalised, and library size normalised peak counts for plotting
 ```{r}
@@ -539,11 +524,6 @@ plot_pca <- function(mat, dim1=1, dim2=2, scale=TRUE){
         
         # Transpose
         mat <- t(mat)
-        
-        # Remove low variance features
-        #lowVar <- nearZeroVar(mat, saveMetrics = TRUE)
-        #message(str_c("Low variance features removed = ", sum(lowVar$nzv)))
-        #mat <- mat[ ,!lowVar$nzv]
         
         # Calculate PC's
         pr <- prcomp(x = mat, scale.=scale)
@@ -573,13 +553,13 @@ atac_pca <- plot_pca(peak_rpkm)
 atac_pca
 ```
 
-
 Here we see some variance in the read count distributions between libraries, and not real clear seperation of treatment groups. 
 In these cases, removing peaks with low counts and between-sample normalisaion often helps. 
 
-Filter low-count peaks and plot PCA
+Filter low-count peaks and plot PCA. Here we will try filtering for peaks with RPKM > 4 in at least 2 samples
 ```{r}
-keep <- filterByExpr(peak_counts)
+keep <- rowSums(peak_counts > 5) > 3
+table(keep)
 
 peak_filt_rpkm <- rpkm(peak_counts[keep, ], gene.length = width(union_peak_gr[keep]),
                   log = TRUE, prior.count = 1)
@@ -595,8 +575,7 @@ peak_filt_rpkm_norm <- normalizeBetweenArrays(peak_filt_rpkm, method = "quantile
 plot_pca(peak_filt_rpkm_norm)
 ```
 
-And now, PC1 seperates the treatment and control groups. 
-
+And now, PC1 seperates the treatment and control groups. Here we see the power of group agnostic peak filtering and normalisation to try and resolve as much biological signal as possible in our data. This will aid us when it comes to deciding on how to run our differential peak analysis.  
 
 ```{r}
 sessionInfo()
