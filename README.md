@@ -50,6 +50,8 @@ Follow the workflow in the [map-atac-subread.Rmd](map-atac-subread.Rmd)
 **Note:** HISAT2 and Bowtie2 are very good and fast aligners for ATAC-seq data, and have pre-compiled indexes available for many model species.  
 
 
+
+
 ### ATAC-seq post-alignment
 - Inspect insert-size histogram  
 - Inspect Tn5 enrichment at TSS  
