@@ -28,6 +28,7 @@ library(tidyr)
 Read the peak counts
 ```{r}
 peak_counts <- read.table("processed_data/atac_peak_counts.tsv")
+head(peak_counts)
 ```
 
 Set the treatment and control groups
@@ -38,6 +39,7 @@ samples <- str_sub(string = colnames(peak_counts), start = 2, end = 5)
 samples <- str_c(samples, groups, sep = "_")
 
 ```
+
 Load counts into a DGEList
 ```{r}
 y <- DGEList(counts = peak_counts, group = groups, samples = samples)
@@ -200,9 +202,12 @@ plot_de <- function(ids){
         
 }
 
-my_top_peaks <- rownames(tt2)[tt2$Significant == TRUE][1:6]
+my_top_peaks <- rownames(tt2)[tt2$Significant == TRUE]
+tail(my_top_peaks)
 
-plot_de(ids = my_top_peaks)
+my_top_peaks2 <- rownames(tt2)[tt2$Significant == TRUE & tt2$logFC < 1][1:6]
+
+plot_de(ids = my_top_peaks2)
 ```
 
 ### Annotate differential peaks
